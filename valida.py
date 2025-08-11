@@ -1,80 +1,82 @@
 import streamlit as st
 import pandas as pd
+import os
 from io import BytesIO
 
 st.set_page_config(page_title="Valida Matrícula - Verificação Completa", layout="wide")
-st.title("📊 Valida Matrícula - Verificação Completa")
-st.write("Carregue as três bases separadamente. Ao enviar a última (Painel), o sistema fará a verificação automática.")
+st.title("📊 Valida Matrícula - Verificação Completa (Status Unificados)")
+st.write("Carregue as três bases separadamente. Ao enviar a última (Painel), gera a base de verificação com status unificados.")
 
-# Função para normalizar colunas
 def normalize_col_names(df):
     df.columns = [col.strip().lower() for col in df.columns]
     return df
 
-# Variáveis para armazenar as bases
-if "educapi_base" not in st.session_state:
-    st.session_state.educapi_base = None
-if "comercial_base" not in st.session_state:
-    st.session_state.comercial_base = None
-if "painel_base" not in st.session_state:
-    st.session_state.painel_base = None
-if "verificar" not in st.session_state:
-    st.session_state.verificar = None
+def carregar_arquivo(file):
+    if file is None:
+        return None
+    ext = os.path.splitext(file.name)[1].lower()
+    try:
+        if ext == ".csv":
+            df = pd.read_csv(file, encoding="utf-8", sep=";", header=1)
+        elif ext == ".xlsx":
+            df = pd.read_excel(file, engine="openpyxl", header=1)
+        elif ext == ".xls":
+            df = pd.read_excel(file, engine="xlrd", header=1)
+        else:
+            st.error(f"⚠️ Formato não suportado: {ext}")
+            return None
+        return normalize_col_names(df)
+    except Exception as e:
+        st.error(f"Erro ao ler {file.name}: {e}")
+        return None
 
-# Uploads separados
+for base in ["educapi_base", "comercial_base", "painel_base", "verificar"]:
+    if base not in st.session_state:
+        st.session_state[base] = None
+
 st.subheader("📂 Upload das Bases")
 educapi_file = st.file_uploader("Carregar Base Educapi", type=["xls", "xlsx", "csv"], key="educapi")
-if educapi_file is not None:
-    if educapi_file.name.endswith(".csv"):
-        df = pd.read_csv(educapi_file, encoding="utf-8", sep=";", header=1)
-    else:
-        df = pd.read_excel(educapi_file, header=1)
-    st.session_state.educapi_base = normalize_col_names(df)
-    st.success("Base Educapi carregada!")
+if educapi_file:
+    st.session_state.educapi_base = carregar_arquivo(educapi_file)
+    if st.session_state.educapi_base is not None:
+        st.success("✅ Base Educapi carregada!")
 
 comercial_file = st.file_uploader("Carregar Base Comercial", type=["xls", "xlsx", "csv"], key="comercial")
-if comercial_file is not None:
-    if comercial_file.name.endswith(".csv"):
-        df = pd.read_csv(comercial_file, encoding="utf-8", sep=";", header=1)
-    else:
-        df = pd.read_excel(comercial_file, header=1)
-    st.session_state.comercial_base = normalize_col_names(df)
-    st.success("Base Comercial carregada!")
+if comercial_file:
+    st.session_state.comercial_base = carregar_arquivo(comercial_file)
+    if st.session_state.comercial_base is not None:
+        st.success("✅ Base Comercial carregada!")
 
 painel_file = st.file_uploader("Carregar Base Painel", type=["xls", "xlsx", "csv"], key="painel")
-if painel_file is not None:
-    if painel_file.name.endswith(".csv"):
-        df = pd.read_csv(painel_file, encoding="utf-8", sep=";", header=1)
-    else:
-        df = pd.read_excel(painel_file, header=1)
-    st.session_state.painel_base = normalize_col_names(df)
-    st.success("Base Painel carregada!")
+if painel_file:
+    st.session_state.painel_base = carregar_arquivo(painel_file)
+    if st.session_state.painel_base is not None:
+        st.success("✅ Base Painel carregada!")
 
-# Função para gerar a base de inconsistências
-def gerar_verificacao():
+def gerar_verificacao_unificada():
     educapi = st.session_state.educapi_base
     comercial = st.session_state.comercial_base
     painel = st.session_state.painel_base
 
-    verificar = pd.DataFrame()
+    col_cpf_painel = next((c for c in painel.columns if "cpf" in c), None)
+    col_nome_painel = next((c for c in painel.columns if "nome" in c), None)
 
-    # Identificar colunas
-    col_cpf_painel = next((col for col in painel.columns if "cpf" in col), None)
-    col_nome_painel = next((col for col in painel.columns if "nome" in col), None)
+    col_cpf_educapi = next((c for c in educapi.columns if "cpf" in c), None)
+    col_estado_educapi = next((c for c in educapi.columns if "estado" in c or "uf" in c), None)
+    col_nome_educapi = next((c for c in educapi.columns if "nome" in c), None)
 
-    col_cpf_educapi = next((col for col in educapi.columns if "cpf" in col), None)
-    col_estado_educapi = next((col for col in educapi.columns if "estado" in col or "uf" in col), None)
-    col_nome_educapi = next((col for col in educapi.columns if "nome" in col), None)
-
-    col_cpf_comercial = next((col for col in comercial.columns if "cpf" in col), None)
-    col_estado_comercial = next((col for col in comercial.columns if "estado" in col or "uf" in col), None)
-    col_nome_comercial = next((col for col in comercial.columns if "nome" in col), None)
+    col_cpf_comercial = next((c for c in comercial.columns if "cpf" in c), None)
+    col_estado_comercial = next((c for c in comercial.columns if "estado" in c or "uf" in c), None)
+    col_nome_comercial = next((c for c in comercial.columns if "nome" in c), None)
 
     if not all([col_cpf_painel, col_nome_painel,
                 col_cpf_educapi, col_estado_educapi, col_nome_educapi,
                 col_cpf_comercial, col_estado_comercial, col_nome_comercial]):
-        st.error("Faltam colunas obrigatórias (CPF, Nome ou Estado/UF) em alguma das bases.")
+        st.error("❌ Faltam colunas obrigatórias (CPF, Nome ou Estado/UF) em alguma das bases.")
         return None
+
+    # Usar um dicionário para acumular status por CPF
+    inconsistencias_dict = {}
 
     for _, row in painel.iterrows():
         cpf = str(row[col_cpf_painel]).strip()
@@ -83,67 +85,61 @@ def gerar_verificacao():
         educapi_aluno = educapi[educapi[col_cpf_educapi].astype(str).str.strip() == cpf]
         comercial_aluno = comercial[comercial[col_cpf_comercial].astype(str).str.strip() == cpf]
 
-        encontrado = False
+        status_list = []
 
         # Regra 1: CPF presente em ambas as bases
         if not educapi_aluno.empty and not comercial_aluno.empty:
-            inconsistencia = row.to_dict()
-            inconsistencia["Status"] = "CPF presente em ambas as bases"
-            verificar = pd.concat([verificar, pd.DataFrame([inconsistencia])], ignore_index=True)
-            encontrado = True
+            status_list.append("CPF presente em ambas as bases")
 
-        # Regra 2: Nome divergente
+        # Regra 2: Nome divergente Educapi
         if not educapi_aluno.empty:
-            encontrado = True
             nome_educapi = str(educapi_aluno.iloc[0][col_nome_educapi]).strip()
             if nome_educapi.lower() != nome_painel.lower():
-                inconsistencia = row.to_dict()
-                inconsistencia["Status"] = "Nome cadastrado não bate no Painel"
-                verificar = pd.concat([verificar, pd.DataFrame([inconsistencia])], ignore_index=True)
+                status_list.append("Nome cadastrado não bate no Painel")
 
+        # Regra 2: Nome divergente Comercial
         if not comercial_aluno.empty:
-            encontrado = True
             nome_comercial = str(comercial_aluno.iloc[0][col_nome_comercial]).strip()
             if nome_comercial.lower() != nome_painel.lower():
-                inconsistencia = row.to_dict()
-                inconsistencia["Status"] = "Nome cadastrado não bate no Painel"
-                verificar = pd.concat([verificar, pd.DataFrame([inconsistencia])], ignore_index=True)
+                status_list.append("Nome cadastrado não bate no Painel")
 
-        # Regra 3: Plataforma errada
+        # Regra 3: Plataforma errada Educapi (SP)
         if not educapi_aluno.empty:
             estado_educapi = str(educapi_aluno.iloc[0][col_estado_educapi]).strip().upper()
             if "SP" in estado_educapi:
-                inconsistencia = row.to_dict()
-                inconsistencia["Status"] = "Cadastro em plataforma errada"
-                verificar = pd.concat([verificar, pd.DataFrame([inconsistencia])], ignore_index=True)
+                status_list.append("Cadastro em plataforma errada")
 
+        # Regra 3: Plataforma errada Comercial (fora SP)
         if not comercial_aluno.empty:
             estado_comercial = str(comercial_aluno.iloc[0][col_estado_comercial]).strip().upper()
             if "SP" not in estado_comercial:
-                inconsistencia = row.to_dict()
-                inconsistencia["Status"] = "Cadastro em plataforma errada"
-                verificar = pd.concat([verificar, pd.DataFrame([inconsistencia])], ignore_index=True)
+                status_list.append("Cadastro em plataforma errada")
 
         # Regra 4: CPF não encontrado
         if educapi_aluno.empty and comercial_aluno.empty:
-            inconsistencia = row.to_dict()
-            inconsistencia["Status"] = "CPF não encontrado"
-            verificar = pd.concat([verificar, pd.DataFrame([inconsistencia])], ignore_index=True)
+            status_list.append("CPF não encontrado")
 
-    return verificar
+        if status_list:
+            # Unificar status em string separada por vírgulas, removendo duplicados
+            status_unificado = ", ".join(sorted(set(status_list)))
 
-# Se todas as bases já foram carregadas, gerar resultado
-if st.session_state.educapi_base is not None and st.session_state.comercial_base is not None and st.session_state.painel_base is not None:
-    st.session_state.verificar = gerar_verificacao()
+            # Incluir a linha original com a coluna Status atualizada
+            inconsistencias_dict[cpf] = {**row.to_dict(), "Status": status_unificado}
 
-# Mostrar resultado se existir
+    # Converter o dicionário de inconsistências para DataFrame
+    verificar_df = pd.DataFrame(list(inconsistencias_dict.values()))
+
+    return verificar_df
+
+if all([st.session_state.educapi_base, st.session_state.comercial_base, st.session_state.painel_base]):
+    st.session_state.verificar = gerar_verificacao_unificada()
+
 if st.session_state.verificar is not None and not st.session_state.verificar.empty:
     st.subheader("📋 Base de Inconsistências - VERIFICAR")
     st.dataframe(st.session_state.verificar, use_container_width=True)
 
-    # Exportar para Excel
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         st.session_state.verificar.to_excel(writer, index=False, sheet_name="Verificar")
     excel_data = output.getvalue()
 
@@ -153,3 +149,4 @@ if st.session_state.verificar is not None and not st.session_state.verificar.emp
         file_name="verificar.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
