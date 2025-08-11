@@ -3,63 +3,44 @@ import pandas as pd
 import os
 from io import BytesIO
 
-# Configuração básica
 st.set_page_config(page_title="Valida Matrícula", layout="wide")
 st.title("📊 Valida Matrícula")
 
-# Função para normalizar nomes de colunas
 def normalize_col_names(df):
     df.columns = [str(col).strip().lower() for col in df.columns]
     return df
 
-# Função robusta para ler qualquer tipo de Excel ou CSV
 def carregar_arquivo(file):
     if file is None:
         return None
 
     ext = os.path.splitext(file.name)[1].lower()
     try:
-        # 🟢 1: Tenta como CSV
+        # 1. Tenta CSV
         if ext == ".csv":
             df = pd.read_csv(file, encoding="utf-8", sep=";", header=1)
             return normalize_col_names(df)
 
-        # 🟢 2: Tenta como Excel com vários engines
-        try:
-            df = pd.read_excel(file, engine="openpyxl", header=1)  # Para .xlsx
-            return normalize_col_names(df)
-        except:
-            pass
-        try:
-            df = pd.read_excel(file, engine="xlrd", header=1)  # Para .xls
-            return normalize_col_names(df)
-        except:
-            pass
-        try:
-            df = pd.read_excel(file, engine="odf", header=1)  # Para .ods
-            return normalize_col_names(df)
-        except:
-            pass
-        try:
-            df = pd.read_excel(file, engine="pyxlsb", header=1)  # Para .xlsb
-            return normalize_col_names(df)
-        except:
-            pass
+        # 2. Tenta Excel múltiplos engines
+        for engine in ["openpyxl", "xlrd", "odf", "pyxlsb"]:
+            try:
+                df = pd.read_excel(file, header=1, engine=engine)
+                return normalize_col_names(df)
+            except:
+                pass
 
-        # 🟢 3: Tenta como HTML (alguns sistemas exportam .xls como HTML)
+        # 3. Tenta HTML (exportação em .xls que é HTML)
         file.seek(0)
         try:
             tables = pd.read_html(file)
             if tables:
                 df = tables[0]
-                # Assume que a primeira linha é o cabeçalho
                 df.columns = df.iloc[0]
                 df = df[1:].reset_index(drop=True)
                 return normalize_col_names(df)
         except:
             pass
 
-        # ❌ Falhou todas as leituras
         st.error(f"⚠️ Não foi possível ler o arquivo {file.name}. Formato não suportado ou corrompido.")
         return None
 
@@ -67,15 +48,13 @@ def carregar_arquivo(file):
         st.error(f"Erro ao processar {file.name}: {e}")
         return None
 
-# Estado para armazenar bases
 for base in ["educapi_base", "comercial_base", "painel_base", "verificar"]:
     if base not in st.session_state:
         st.session_state[base] = None
 
-# Upload das bases
 st.subheader("📂 Envie suas bases:")
 
-educapi_file = st.file_uploader("Base Educapi", type=None, key="educapi")  # type=None libera qualquer formato
+educapi_file = st.file_uploader("Base Educapi", type=None, key="educapi")
 if educapi_file:
     st.session_state.educapi_base = carregar_arquivo(educapi_file)
     if st.session_state.educapi_base is not None:
@@ -93,13 +72,11 @@ if painel_file:
     if st.session_state.painel_base is not None:
         st.success("Base Painel carregada.")
 
-# Função para gerar base unificada de inconsistências
 def gerar_verificacao():
     educapi = st.session_state.educapi_base
     comercial = st.session_state.comercial_base
     painel = st.session_state.painel_base
 
-    # Identifica colunas obrigatórias
     col_cpf_painel = next((c for c in painel.columns if "cpf" in c), None)
     col_nome_painel = next((c for c in painel.columns if "nome" in c), None)
     col_cpf_educapi = next((c for c in educapi.columns if "cpf" in c), None)
@@ -151,13 +128,11 @@ def gerar_verificacao():
 
     return pd.DataFrame(list(inconsistencias_dict.values()))
 
-# Executa automaticamente quando as 3 bases forem carregadas
 if all([st.session_state.educapi_base is not None,
         st.session_state.comercial_base is not None,
         st.session_state.painel_base is not None]):
     st.session_state.verificar = gerar_verificacao()
 
-# Exibe resultado e exporta
 if st.session_state.verificar is not None and not st.session_state.verificar.empty:
     st.subheader("📋 Base de Inconsistências")
     st.dataframe(st.session_state.verificar, use_container_width=True)
