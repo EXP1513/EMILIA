@@ -21,7 +21,18 @@ def carregar_arquivo(file):
         elif ext == ".xlsx":
             df = pd.read_excel(file, engine="openpyxl", header=1)
         elif ext == ".xls":
-            df = pd.read_excel(file, engine="xlrd", header=1)
+            try:
+                df = pd.read_excel(file, engine="xlrd", header=1)
+            except Exception:
+                file.seek(0)  # Retorna ao início do arquivo para nova tentativa
+                tables = pd.read_html(file)
+                if tables:
+                    df = tables[0]
+                    df.columns = df.iloc[0]
+                    df = df[1:].reset_index(drop=True)
+                else:
+                    st.error(f"Erro ao ler {file.name}: formato XLS inválido ou corrompido.")
+                    return None
         else:
             st.error(f"⚠️ Formato não suportado: {ext}")
             return None
@@ -75,61 +86,48 @@ def gerar_verificacao_unificada():
         st.error("❌ Faltam colunas obrigatórias (CPF, Nome ou Estado/UF) em alguma das bases.")
         return None
 
-    # Usar um dicionário para acumular status por CPF
     inconsistencias_dict = {}
 
     for _, row in painel.iterrows():
-        cpf = str(row[col_cpf_painel]).strip()
-        nome_painel = str(row[col_nome_painel]).strip()
+        cpf = str(row[col_cpf_painel] or "").strip()
+        nome_painel = str(row[col_nome_painel] or "").strip()
 
         educapi_aluno = educapi[educapi[col_cpf_educapi].astype(str).str.strip() == cpf]
         comercial_aluno = comercial[comercial[col_cpf_comercial].astype(str).str.strip() == cpf]
 
         status_list = []
 
-        # Regra 1: CPF presente em ambas as bases
         if not educapi_aluno.empty and not comercial_aluno.empty:
             status_list.append("CPF presente em ambas as bases")
 
-        # Regra 2: Nome divergente Educapi
         if not educapi_aluno.empty:
-            nome_educapi = str(educapi_aluno.iloc[0][col_nome_educapi]).strip()
+            nome_educapi = str(educapi_aluno.iloc[0][col_nome_educapi] or "").strip()
             if nome_educapi.lower() != nome_painel.lower():
                 status_list.append("Nome cadastrado não bate no Painel")
 
-        # Regra 2: Nome divergente Comercial
         if not comercial_aluno.empty:
-            nome_comercial = str(comercial_aluno.iloc[0][col_nome_comercial]).strip()
+            nome_comercial = str(comercial_aluno.iloc[0][col_nome_comercial] or "").strip()
             if nome_comercial.lower() != nome_painel.lower():
                 status_list.append("Nome cadastrado não bate no Painel")
 
-        # Regra 3: Plataforma errada Educapi (SP)
         if not educapi_aluno.empty:
-            estado_educapi = str(educapi_aluno.iloc[0][col_estado_educapi]).strip().upper()
+            estado_educapi = str(educapi_aluno.iloc[0][col_estado_educapi] or "").strip().upper()
             if "SP" in estado_educapi:
                 status_list.append("Cadastro em plataforma errada")
 
-        # Regra 3: Plataforma errada Comercial (fora SP)
         if not comercial_aluno.empty:
-            estado_comercial = str(comercial_aluno.iloc[0][col_estado_comercial]).strip().upper()
+            estado_comercial = str(comercial_aluno.iloc[0][col_estado_comercial] or "").strip().upper()
             if "SP" not in estado_comercial:
                 status_list.append("Cadastro em plataforma errada")
 
-        # Regra 4: CPF não encontrado
         if educapi_aluno.empty and comercial_aluno.empty:
             status_list.append("CPF não encontrado")
 
         if status_list:
-            # Unificar status em string separada por vírgulas, removendo duplicados
             status_unificado = ", ".join(sorted(set(status_list)))
-
-            # Incluir a linha original com a coluna Status atualizada
             inconsistencias_dict[cpf] = {**row.to_dict(), "Status": status_unificado}
 
-    # Converter o dicionário de inconsistências para DataFrame
-    verificar_df = pd.DataFrame(list(inconsistencias_dict.values()))
-
-    return verificar_df
+    return pd.DataFrame(list(inconsistencias_dict.values()))
 
 if all([st.session_state.educapi_base, st.session_state.comercial_base, st.session_state.painel_base]):
     st.session_state.verificar = gerar_verificacao_unificada()
@@ -149,4 +147,3 @@ if st.session_state.verificar is not None and not st.session_state.verificar.emp
         file_name="verificar.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-
