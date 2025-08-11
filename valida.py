@@ -11,35 +11,52 @@ def normalize_col_names(df):
     return df
 
 def carregar_arquivo(file):
+    """Carrega qualquer tipo de arquivo Excel/CSV e converte internamente para Excel válido se necessário"""
     if file is None:
         return None
 
     ext = os.path.splitext(file.name)[1].lower()
+
     try:
-        # 1. Tenta CSV
+        # 1️⃣ CSV
         if ext == ".csv":
             df = pd.read_csv(file, encoding="utf-8", sep=";", header=1)
             return normalize_col_names(df)
 
-        # 2. Tenta Excel múltiplos engines
-        for engine in ["openpyxl", "xlrd", "odf", "pyxlsb"]:
+        # 2️⃣ XLSX, XLSB, ODS => tenta múltiplos engines
+        for engine in ["openpyxl", "pyxlsb", "odf"]:
             try:
                 df = pd.read_excel(file, header=1, engine=engine)
                 return normalize_col_names(df)
             except:
                 pass
 
-        # 3. Tenta HTML (exportação em .xls que é HTML)
-        file.seek(0)
-        try:
-            tables = pd.read_html(file)
-            if tables:
-                df = tables[0]
-                df.columns = df.iloc[0]
-                df = df[1:].reset_index(drop=True)
+        # 3️⃣ XLS antigo -> tenta com xlrd
+        if ext == ".xls":
+            try:
+                df = pd.read_excel(file, header=1, engine="xlrd")
                 return normalize_col_names(df)
-        except:
-            pass
+            except:
+                pass
+
+            # Se falhar, tenta como HTML exportado
+            file.seek(0)
+            try:
+                tables = pd.read_html(file)
+                if tables:
+                    df = tables[0]
+                    df.columns = df.iloc[0]
+                    df = df[1:].reset_index(drop=True)
+
+                    # 💡 Converte internamente para XLSX válido
+                    temp_xlsx = BytesIO()
+                    with pd.ExcelWriter(temp_xlsx, engine="xlsxwriter") as writer:
+                        df.to_excel(writer, index=False, sheet_name="Dados")
+                    temp_xlsx.seek(0)
+                    df = pd.read_excel(temp_xlsx, engine="openpyxl", header=0)
+                    return normalize_col_names(df)
+            except:
+                pass
 
         st.error(f"⚠️ Não foi possível ler o arquivo {file.name}. Formato não suportado ou corrompido.")
         return None
@@ -48,10 +65,12 @@ def carregar_arquivo(file):
         st.error(f"Erro ao processar {file.name}: {e}")
         return None
 
+# Estado da sessão
 for base in ["educapi_base", "comercial_base", "painel_base", "verificar"]:
     if base not in st.session_state:
         st.session_state[base] = None
 
+# Uploads
 st.subheader("📂 Envie suas bases:")
 
 educapi_file = st.file_uploader("Base Educapi", type=None, key="educapi")
@@ -77,6 +96,7 @@ def gerar_verificacao():
     comercial = st.session_state.comercial_base
     painel = st.session_state.painel_base
 
+    # Detectar colunas
     col_cpf_painel = next((c for c in painel.columns if "cpf" in c), None)
     col_nome_painel = next((c for c in painel.columns if "nome" in c), None)
     col_cpf_educapi = next((c for c in educapi.columns if "cpf" in c), None)
@@ -128,11 +148,13 @@ def gerar_verificacao():
 
     return pd.DataFrame(list(inconsistencias_dict.values()))
 
+# Gera automaticamente quando as 3 bases forem carregadas
 if all([st.session_state.educapi_base is not None,
         st.session_state.comercial_base is not None,
         st.session_state.painel_base is not None]):
     st.session_state.verificar = gerar_verificacao()
 
+# Mostra e exporta
 if st.session_state.verificar is not None and not st.session_state.verificar.empty:
     st.subheader("📋 Base de Inconsistências")
     st.dataframe(st.session_state.verificar, use_container_width=True)
@@ -145,3 +167,4 @@ if st.session_state.verificar is not None and not st.session_state.verificar.emp
         file_name="verificar.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
